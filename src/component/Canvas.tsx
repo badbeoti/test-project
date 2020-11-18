@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, MutableRefObject } from "react";
 import styled from "styled-components";
 import * as d3 from "d3";
-import { scaleLinear, svg, line, scaleBand, curveCardinal } from "d3";
+import { scaleLinear } from "d3";
 import { select, Selection } from "d3-selection";
 import { scaleTime } from "d3";
 import { max } from "d3-array";
+import { zoom, zoomTransform } from "d3-zoom";
+import { transform } from "typescript";
 
 interface CanvasFace {
 	prevData: {
@@ -44,33 +46,93 @@ function Canvas({ prevData }: CanvasFace) {
 		unknown,
 		null,
 		undefined
-	>>(null);
+	>>();
+	const [currentZoomState, setCurrentZoomState] = useState(d3.zoomIdentity);
 
 	const timeScaleParse = d3.timeParse("%Y.%m.%d %H:%M");
 
 	let xScale = scaleTime()
 		.domain([
-			timeScaleParse("2020.5.3 0:00")!,
-			timeScaleParse("2020.5.19 11:45")!,
+			timeScaleParse(`${selectList[0].time}`)!,
+			timeScaleParse(`${selectList[selectList.length - 1].time}`)!,
 		])
 		.range([0, canvas.chartWidth]);
 
 	let yScale = scaleLinear()
-		.domain([0, d3.max(selectList, (d) => d.BlackScr)! + 30])
+		.domain([0, d3.max(selectList, (d) => d.BlackScr)! + 10])
 		.range([canvas.chartHeight, 0]);
-
-	const xAxisBot = d3.axisBottom(xScale);
-	const yAxisRight = d3.axisRight(yScale);
 
 	useEffect(() => {
 		setList(prevData);
-	}, selectList);
+	}, [selectList]);
+
+	const line = d3.line();
 
 	useEffect(() => {
 		if (!selection) {
 			setSelection(select(ref.current));
 		} else {
-			const line = d3.line();
+			if (currentZoomState.x === 0) {
+				let pathOfLine = line(
+					selectList.map((d) => [
+						xScale(timeScaleParse(d.time)!)!,
+						yScale(d.BlackScr),
+					])
+				);
+
+				const xAxisGroup = selection
+					.append("g")
+					.attr("font-weight", "bold")
+					.attr("transform", `translate(0,${canvas.chartHeight})`)
+					.attr("class", "xAxis")
+					.call(d3.axisBottom(xScale));
+
+				const yAxisGroup = selection
+					.append("g")
+					.attr("transform", `translate(${canvas.chartWidth},0)`)
+					.call(d3.axisRight(yScale));
+
+				console.log(currentZoomState);
+
+				const zoomSection = zoom()
+					.scaleExtent([0.5, 5])
+					.translateExtent([
+						[0, 0],
+						[canvas.chartWidth, canvas.chartHeight],
+					])
+					.on("zoom", () => {
+						const zoomState = zoomTransform(selection.node()!);
+						setCurrentZoomState(zoomState);
+					});
+
+				zoomSection(d3.select("svg"));
+
+				selection
+					.append("path")
+					.attr("d", pathOfLine!)
+					.attr("stroke", "black")
+					.attr("fill", "none");
+
+				selection
+					.selectAll(".myDot")
+					.data(selectList)
+					.join("circle")
+					.attr("class", "myDot")
+					.attr("r", 1)
+					.attr("fill", "orange")
+					.attr("cx", (d) => xScale(timeScaleParse(d.time)!)!)
+					.attr("cy", (d) => yScale(d.BlackScr));
+			}
+		}
+	}, [selection]);
+
+	useEffect(() => {
+		if (selection && currentZoomState.x !== 0) {
+			console.log("done");
+			const newXScale = currentZoomState.rescaleX(xScale);
+			xScale.domain(newXScale.domain());
+
+			selection.select("path").style("d", "");
 
 			const pathOfLine = line(
 				selectList.map((d) => [
@@ -79,17 +141,14 @@ function Canvas({ prevData }: CanvasFace) {
 				])
 			);
 
-			const xAxisGroup = selection
+			selection.selectAll(".xAxis").style("transform", "");
+
+			selection
 				.append("g")
 				.attr("font-weight", "bold")
 				.attr("transform", `translate(0,${canvas.chartHeight})`)
 				.attr("class", "xAxis")
-				.call(xAxisBot);
-
-			const yAxisGroup = selection
-				.append("g")
-				.attr("transform", `translate(${canvas.chartWidth},0)`)
-				.call(yAxisRight);
+				.call(d3.axisBottom(xScale));
 
 			selection
 				.append("path")
@@ -97,18 +156,19 @@ function Canvas({ prevData }: CanvasFace) {
 				.attr("stroke", "black")
 				.attr("fill", "none");
 
-			// selection
-			// 	.selectAll("rect")
-			// 	.data(selectList)
-			// 	.enter()
-			// 	.append("rect")
-			// 	.attr("fill", "blue")
-			// 	.attr("width", 1)
-			// 	.attr("x", (d) => xScale(timeScaleParse(d.time)!)!)
-			// 	.attr("height", (d) => canvas.chartHeight - yScale(d.BlackScr)!)
-			// 	.attr("y", (d) => yScale(d.BlackScr)!);
+			selection.selectAll(".myDot").exit().remove();
+
+			selection
+				.selectAll(".myDot")
+				.data(selectList)
+				.join("circle")
+				.attr("class", "myDot")
+				.attr("r", 1)
+				.attr("fill", "orange")
+				.attr("cx", (d) => xScale(timeScaleParse(d.time)!)!)
+				.attr("cy", (d) => yScale(d.BlackScr));
 		}
-	}, [selection]);
+	}, [currentZoomState]);
 
 	return (
 		<div>
